@@ -1,72 +1,112 @@
-# Komari + Cloudflare + Nginx bootstrap
+# Komari + Cloudflare + Nginx 安全反向代理脚本
 
-Safely moves an existing Docker-based [Komari](https://github.com/komari-monitor/komari) panel behind Nginx and Cloudflare on **Debian 13**.
+适用于已用 Docker 运行 Komari 面板的 **Debian 13** 服务器。
 
-It changes an existing public Komari port mapping to `127.0.0.1:25774:25774`. Nginx provides **HTTPS only** on port 443. The existing `/app/data` bind mount is detected and retained.
+脚本会把原先 Docker 的公网端口映射，收紧为仅本机可访问的 `127.0.0.1:25774:25774`；外部访问统一经由 Cloudflare 与 Nginx 的 HTTPS `443` 端口。
 
-## What the script does
+## 脚本会做什么
 
-- Validates that the supplied Cloudflare Origin Certificate and private key match.
-- Installs and enables Nginx.
-- Creates a TLS Nginx reverse proxy with WebSocket support required by Komari.
-- Does not create an HTTP listener for Komari; the VPS firewall only needs to allow TCP 443.
-- Preserves the old Komari container as a stopped, timestamped rollback container.
-- Creates the replacement container without pulling a new image or deleting data.
-- Optionally enables Debian unattended **security** updates, which include Nginx security updates.
-- Tests the Nginx configuration and the local Komari endpoint before reporting success.
+- 校验 Cloudflare 源证书与私钥是否匹配。
+- 安装并启用 Nginx，配置 Komari 所需的 HTTPS 与 WebSocket 反向代理。
+- 只为 Komari 配置 HTTPS `443`；不创建 Komari 的 HTTP `80` 入口。
+- 保留原 Komari 数据目录，不拉取新镜像，也不删除数据。
+- 停止并重命名旧 Komari 容器，保留为可回滚备份。
+- 可选启用 Debian 无人值守**安全更新**，包含 Nginx 安全补丁。
+- 在完成前校验 Nginx 配置，并检查本机 Komari 是否响应。
 
-It never prints certificate keys, opens firewall ports, disables a firewall, changes SSH settings, installs Docker, or uploads any secret.
+## 脚本不会做什么
 
-## Before running
+- 不会显示、上传或提交任何证书私钥。
+- 不会打开防火墙端口、关闭防火墙或修改 SSH 设置。
+- 不会删除原 Komari 数据或直接删除旧容器。
+- 不会自动在 Cloudflare 创建 DNS 记录或证书。
 
-1. In Cloudflare DNS, create a hostname such as `komari.example.com` as an `A` record pointing at the VPS and keep it **proxied** (orange cloud).
-2. In **SSL/TLS → Origin Server → Create certificate**, use “Cloudflare generates a private key and a CSR”. Ensure the certificate lists your hostname or a matching one-level wildcard (for example, `*.example.com` covers `komari.example.com`). Create the certificate and copy both output blocks before leaving the page.
-3. On the VPS, save the two Cloudflare values to files. Do not paste either value into shell history or commit it to Git.
+## 开始前准备
 
-   Create the protected directory and open the certificate file:
+### 1. 配置 Cloudflare DNS
 
-   ```bash
-   install -d -m 0700 /root/komari-origin
-   nano /root/komari-origin/origin.pem
-   ```
+在 Cloudflare DNS 中创建 Komari 使用的子域名：
 
-   Paste the entire **Origin Certificate**, including its `BEGIN CERTIFICATE` and `END CERTIFICATE` lines. Save in Nano with `Ctrl+O`, press `Enter` to confirm the file name, then exit with `Ctrl+X`.
+- 类型：`A`
+- 内容：VPS 公网 IP
+- 代理状态：**已代理**（橙色小黄云）
 
-   Open the private-key file:
+### 2. 创建 Cloudflare 源证书
 
-   ```bash
-   nano /root/komari-origin/origin.key
-   ```
+进入 **SSL/TLS → 源服务器 → 创建证书**，选择“Cloudflare 生成私钥和 CSR”。
 
-   Paste the entire **Private Key**, including its `BEGIN PRIVATE KEY` and `END PRIVATE KEY` lines. Again use `Ctrl+O`, `Enter`, then `Ctrl+X` to save and exit. Finally restrict the key file:
+证书主机名填写你的 Komari 子域名；也可以使用匹配的单级通配符证书，例如 `*.example.com` 可以覆盖 `komari.example.com`。
 
-   ```bash
-   chmod 600 /root/komari-origin/origin.key
-   ls -l /root/komari-origin
-   ```
+创建后页面会显示两段内容：**源证书**和**私钥**。私钥只显示一次，务必立即保存；不要截图、发送给他人或提交到 Git 仓库。
 
-   The final command should show both files. Do not post their contents anywhere.
+### 3. 在 VPS 保存证书与私钥
 
-4. Confirm that your existing SSH port plus **TCP 443** are permitted by the VPS provider and host firewall. Do **not** open TCP 80, Komari's internal port, or its former public port.
+在 SSH 终端以 root 执行：
 
-## Run
+```bash
+install -d -m 0700 /root/komari-origin
+nano /root/komari-origin/origin.pem
+```
 
-Run these commands as root. They download the current script, make it executable, and start its interactive setup:
+把 Cloudflare 的“源证书”完整粘贴进去，包含：
+
+```text
+-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----
+```
+
+保存与退出 Nano：按 `Ctrl+O`（字母 O）→ 按 `Enter` 确认文件名 → 按 `Ctrl+X` 退出。
+
+接着保存私钥：
+
+```bash
+nano /root/komari-origin/origin.key
+```
+
+粘贴 Cloudflare 的“私钥”完整内容。它通常从 `-----BEGIN PRIVATE KEY-----` 开始，到 `-----END PRIVATE KEY-----` 结束。再次按 `Ctrl+O` → `Enter` → `Ctrl+X` 保存退出。
+
+最后限制私钥权限并确认两个文件存在：
+
+```bash
+chmod 600 /root/komari-origin/origin.key
+ls -l /root/komari-origin
+```
+
+正常会看到 `origin.pem` 和 `origin.key`；不要输出或分享文件内容。
+
+### 4. 放行必要端口
+
+在 VPS 服务商安全组与主机防火墙中，仅保留：
+
+- 你当前使用的 SSH 端口。
+- TCP `443`。
+
+不要为 Komari 开放 TCP `80`、容器内部端口或旧公网端口。请先保留当前 SSH 会话，等 HTTPS 域名验证成功后，再从云安全组/防火墙中移除旧端口。
+
+## 一键执行
+
+以下命令可以**原样复制**到 VPS 的 root SSH 终端：
 
 ```bash
 mkdir -p /root/komari-bootstrap
 cd /root/komari-bootstrap
 curl --proto '=https' --tlsv1.2 -fLO https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh
 chmod 700 komari-cloudflare-nginx.sh
+
 ./komari-cloudflare-nginx.sh \
   --cert-file /root/komari-origin/origin.pem \
   --key-file /root/komari-origin/origin.key \
   --enable-security-updates
 ```
 
-The script asks for the public Komari domain. Type your own domain there, then press `Enter`. It then asks for confirmation before it changes Nginx or replaces the running Komari container. Enter `y` to continue. Do not add `--yes` unless you have already checked every path and option.
+脚本会问“请输入 Komari 对外域名”。这时才手动输入你在 Cloudflare 创建的子域名，然后回车。
 
-If you prefer not to use the interactive domain prompt, replace `komari.example.com` below with your own domain, then run:
+接着会展示将要修改的内容，并询问是否继续。确认 Cloudflare 小黄云、证书文件和 TCP `443` 都已准备好后，输入 `y` 回车。
+
+### 不想使用交互输入域名
+
+将下面的 `komari.example.com` 替换为自己的域名后再执行；除此之外不要修改：
 
 ```bash
 ./komari-cloudflare-nginx.sh \
@@ -76,19 +116,27 @@ If you prefer not to use the interactive domain prompt, replace `komari.example.
   --enable-security-updates
 ```
 
-## After the script completes
+## 脚本完成后
 
-In Cloudflare:
+在 Cloudflare 中确认：
 
-1. Go to **SSL/TLS → Overview** and set encryption mode to **Full (strict)**.
-2. Enable **Always Use HTTPS**. Cloudflare redirects HTTP at its edge; the VPS does not need TCP 80 open.
-3. Visit `https://komari.example.com`.
+1. DNS 记录仍为橙色小黄云。
+2. **SSL/TLS → 概述**的加密模式为 **完全（严格）/ Full (strict)**。
+3. 开启 **始终使用 HTTPS / Always Use HTTPS**。HTTP 会在 Cloudflare 边缘跳转，VPS 不需要开放 TCP `80`。
 
-Cloudflare's orange cloud hides the origin IP from normal DNS responses, but it does not itself make the origin inaccessible. For stronger protection, use the optional Authenticated Origin Pulls setup below. Alternatively, restrict TCP 443 at the firewall to Cloudflare IP ranges; maintain those ranges carefully as Cloudflare can update them.
+然后访问：
 
-### Optional: Authenticated Origin Pulls (stronger origin protection)
+```text
+https://你的 Komari 子域名
+```
 
-This prevents direct HTTPS clients from reaching Nginx even if they know the origin IP. Follow Cloudflare's [global AOP setup](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/set-up/global/) to download its public Origin Pull CA certificate and enable global AOP for the zone. Save that CA PEM on the VPS, then run the script with:
+## 可选：Cloudflare AOP（进一步保护源站）
+
+小黄云会隐藏常规 DNS 查询中的源站 IP，但本身不阻止知道源站 IP 的人直接请求 HTTPS。
+
+Cloudflare **Authenticated Origin Pulls（AOP）** 会让 Nginx 只接受携带 Cloudflare 客户端证书的 HTTPS 请求，从而阻止绕过 Cloudflare 的直接访问。建议先完成上面的基础部署并确认域名可访问，再参考 [Cloudflare Global AOP 官方教程](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/set-up/global/) 配置。
+
+下载并保存 AOP 的公开 CA PEM 后，使用下面形式运行脚本：
 
 ```bash
 ./komari-cloudflare-nginx.sh \
@@ -99,44 +147,45 @@ This prevents direct HTTPS clients from reaching Nginx even if they know the ori
   --enable-security-updates
 ```
 
-Only use this option after enabling AOP in Cloudflare; otherwise Cloudflare cannot complete the TLS handshake to the origin.
+仅在 Cloudflare 已启用 AOP 后使用该选项；否则 Cloudflare 无法与源站完成 TLS 握手。
 
-## Security baseline
+## 安全清单
 
-After setup, keep these controls in place:
+- Komari 管理员使用独立高强度密码，并开启 2FA。
+- 每台 Komari Agent（探针）使用 `--disable-web-ssh`，关闭远程终端和远程命令执行。
+- Cloudflare 保持小黄云，SSL 模式使用 **Full (strict)**，不要设置为 Flexible。
+- HTTPS 验证成功后，从云安全组与防火墙删除旧 Komari 公网端口。
+- 使用 `--enable-security-updates` 可自动安装 Debian 安全更新；它不会盲目升级所有软件包。
 
-- Use a unique, high-entropy Komari administrator password and enable two-factor authentication.
-- Disable remote terminal and command execution on every Komari Agent with `--disable-web-ssh`.
-- Keep the Cloudflare DNS record proxied, use **Full (strict)**, and never set the zone to Flexible mode.
-- Remove the former Komari port from the cloud firewall/security group after verifying the HTTPS URL.
-- Run the script with `--enable-security-updates` to install Debian security updates automatically. This applies Nginx security fixes; it does not indiscriminately upgrade all packages.
+## 回滚
 
-## Rollback
+脚本会保留一个停止状态的旧容器，名称类似：
 
-The script retains a stopped container named similar to `komari-before-nginx-20260810120000`.
+```text
+komari-before-nginx-时间戳
+```
 
-To roll back, replace `BACKUP_NAME` with that name:
+将下面的 `旧容器名称` 替换为实际名称后执行：
 
 ```bash
 docker stop komari
 docker rm komari
-docker rename BACKUP_NAME komari
+docker rename 旧容器名称 komari
 docker start komari
 ```
 
-This restores the old public port mapping. It does not delete the Komari data directory.
+这会恢复原来的 Docker 端口映射，不会删除 Komari 数据目录。
 
-## Verification
+## 验证命令
 
 ```bash
 docker ps
 ss -ltnp | grep -E ':(443|25774)\\b'
 nginx -t
-curl -I https://komari.example.com
 ```
 
-Expected result: Nginx listens publicly on `443`; Docker listens only at `127.0.0.1:25774`; no Docker port is published publicly.
+预期结果：Nginx 通过 `443` 提供服务，Docker 只监听 `127.0.0.1:25774`，没有 Docker 容器端口对公网发布。
 
-## License
+## 许可证
 
-MIT. See [LICENSE](LICENSE).
+MIT，详见 [LICENSE](LICENSE)。

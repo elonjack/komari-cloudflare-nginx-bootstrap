@@ -1,5 +1,5 @@
-# Security policy
+# 安全策略
 
-Please do not report security vulnerabilities in public issues. Use GitHub's private vulnerability reporting feature for this repository, or contact the repository owner privately.
+请不要在公开 Issue 中报告安全漏洞。请使用 GitHub 的私密漏洞报告功能，或私下联系仓库维护者。
 
-The script deliberately does not accept certificate values as command-line arguments, log private-key contents, or enable public Docker ports.
+脚本刻意不接受通过命令行传入的证书内容，不记录私钥，不输出私钥，也不开放 Docker 的公网端口。

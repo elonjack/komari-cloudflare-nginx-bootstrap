@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 # shellcheck shell=bash
 
-# Securely place an existing Komari Docker installation behind Nginx and
-# Cloudflare. Designed for Debian 13 (Trixie).
+# 将现有 Komari Docker 面板安全地置于 Nginx 与 Cloudflare 之后。
+# 适用于 Debian 13（Trixie）。
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -26,53 +26,52 @@ AUTO_SECURITY_UPDATES="ask"
 ASSUME_YES=0
 
 log() { printf '[%s] %s\n' "$1" "$2"; }
-info() { log INFO "$*"; }
-warn() { log WARN "$*" >&2; }
-die() { log ERROR "$*" >&2; exit 1; }
+info() { log '信息' "$*"; }
+warn() { log '警告' "$*" >&2; }
+die() { log '错误' "$*" >&2; exit 1; }
 
 on_error() {
   local exit_code=$?
-  log ERROR "Failed at line ${BASH_LINENO[0]} (exit ${exit_code}). No credentials were printed."
+  log '错误' "脚本在第 ${BASH_LINENO[0]} 行失败（退出码 ${exit_code}）。未输出任何证书私钥或凭据。"
   exit "$exit_code"
 }
 trap on_error ERR
 
 usage() {
   cat <<EOF
-Usage:
-  ${SCRIPT_NAME} --domain DOMAIN --cert-file PATH --key-file PATH [options]
+用法：
+  ${SCRIPT_NAME} --domain 域名 --cert-file 路径 --key-file 路径 [选项]
 
-Required:
-  --domain DOMAIN              Public hostname, for example komari.example.com
-  --cert-file PATH             Cloudflare Origin Certificate PEM file
-  --key-file PATH              Matching Cloudflare Origin private-key PEM file
+必填参数：
+  --domain 域名                对外访问域名，例如 komari.example.com
+  --cert-file 路径             Cloudflare 源证书 PEM 文件
+  --key-file 路径              与源证书匹配的私钥 PEM 文件
   --cloudflare-aop-ca-file PATH
-                              Enable Authenticated Origin Pulls using this CA PEM
+                              使用此 CA PEM 启用 Cloudflare AOP
 
-Options:
-  --komari-dir PATH            Komari data parent directory (default: /opt/komari)
-  --container-name NAME        Existing Komari container name (default: komari)
-  --enable-security-updates    Enable Debian unattended security updates (including Nginx)
-  --disable-security-updates   Do not change unattended-update settings
-  --yes                        Do not ask for confirmation
-  -h, --help                   Show this help
+可选参数：
+  --komari-dir 路径            Komari 数据目录的上级目录（默认：/opt/komari）
+  --container-name 名称        现有 Komari 容器名称（默认：komari）
+  --enable-security-updates    启用 Debian 无人值守安全更新（包含 Nginx）
+  --disable-security-updates   不修改现有的自动更新设置
+  --yes                        跳过交互确认；仅限已核对所有参数时使用
+  -h, --help                   显示本帮助
 
-The script does not create, upload, or print private keys. It exposes the
-Komari site through HTTPS only and keeps the old container stopped under a
-timestamped backup name for rollback.
+脚本不会创建、上传或输出私钥；它只通过 HTTPS 443 提供 Komari 服务，
+并保留旧容器（停止状态）以便回滚。
 EOF
 }
 
 require_root() {
-  [[ "${EUID}" -eq 0 ]] || die "Run this script as root."
+  [[ "${EUID}" -eq 0 ]] || die "请以 root 用户运行此脚本。"
 }
 
 require_debian() {
-  [[ -r /etc/os-release ]] || die "Cannot identify the operating system."
+  [[ -r /etc/os-release ]] || die "无法识别当前操作系统。"
   # shellcheck disable=SC1091
   . /etc/os-release
-  [[ "${ID:-}" == "debian" ]] || die "This script supports Debian only; detected ${ID:-unknown}."
-  [[ "${VERSION_ID:-}" == "13" ]] || warn "Designed and tested for Debian 13; detected Debian ${VERSION_ID:-unknown}."
+  [[ "${ID:-}" == "debian" ]] || die "此脚本仅支持 Debian；当前检测到：${ID:-未知}。"
+  [[ "${VERSION_ID:-}" == "13" ]] || warn "脚本按 Debian 13 编写和测试；当前检测到 Debian ${VERSION_ID:-未知}。"
 }
 
 confirm() {
@@ -80,7 +79,7 @@ confirm() {
   if [[ "$ASSUME_YES" -eq 1 ]]; then
     return 0
   fi
-  read -r -p "$prompt [y/N]: " answer
+  read -r -p "$prompt [y/N，直接回车=否]：" answer
   [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
@@ -102,46 +101,47 @@ parse_arguments() {
       --disable-security-updates) AUTO_SECURITY_UPDATES="no"; shift ;;
       --yes) ASSUME_YES=1; shift ;;
       -h|--help) usage; exit 0 ;;
-      *) die "Unknown option: $1" ;;
+      *) die "未知参数：$1；使用 --help 查看帮助。" ;;
     esac
   done
 
   if [[ -z "$DOMAIN" && "$ASSUME_YES" -eq 0 ]]; then
-    read -r -p "Komari public domain (for example komari.example.com): " DOMAIN
+    read -r -p "请输入 Komari 对外域名（例如 komari.example.com）：" DOMAIN
   fi
-  [[ -n "$DOMAIN" ]] || die "--domain is required."
+  [[ -n "$DOMAIN" ]] || die "必须提供 --domain，或在交互提示中输入域名。"
   DOMAIN=${DOMAIN,,}
-  is_valid_domain "$DOMAIN" || die "Invalid domain name: $DOMAIN"
-  [[ -n "$CERT_SOURCE" ]] || die "--cert-file is required."
-  [[ -n "$KEY_SOURCE" ]] || die "--key-file is required."
-  [[ -r "$CERT_SOURCE" ]] || die "Certificate is not readable: $CERT_SOURCE"
-  [[ -r "$KEY_SOURCE" ]] || die "Private key is not readable: $KEY_SOURCE"
-  [[ -z "$AOP_CA_SOURCE" || -r "$AOP_CA_SOURCE" ]] || die "AOP CA certificate is not readable: $AOP_CA_SOURCE"
-  [[ "$KOMARI_DIRECTORY" == /* ]] || die "--komari-dir must be an absolute path."
-  [[ "$CONTAINER_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || die "Invalid container name."
+  is_valid_domain "$DOMAIN" || die "域名格式无效：$DOMAIN"
+  [[ -n "$CERT_SOURCE" ]] || die "必须提供 --cert-file。"
+  [[ -n "$KEY_SOURCE" ]] || die "必须提供 --key-file。"
+  [[ -r "$CERT_SOURCE" ]] || die "无法读取源证书：$CERT_SOURCE"
+  [[ -r "$KEY_SOURCE" ]] || die "无法读取私钥：$KEY_SOURCE"
+  [[ -z "$AOP_CA_SOURCE" || -r "$AOP_CA_SOURCE" ]] || die "无法读取 AOP CA 证书：$AOP_CA_SOURCE"
+  [[ "$KOMARI_DIRECTORY" == /* ]] || die "--komari-dir 必须是绝对路径。"
+  [[ "$CONTAINER_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || die "容器名称格式无效。"
 }
 
 validate_certificate_pair() {
-  command -v openssl >/dev/null 2>&1 || die "openssl is required."
-  openssl x509 -in "$CERT_SOURCE" -noout >/dev/null || die "Invalid certificate PEM file."
-  openssl pkey -in "$KEY_SOURCE" -noout >/dev/null || die "Invalid private-key PEM file."
+  command -v openssl >/dev/null 2>&1 || die "缺少 openssl，无法校验证书。"
+  openssl x509 -in "$CERT_SOURCE" -noout >/dev/null || die "源证书 PEM 文件无效。"
+  openssl pkey -in "$KEY_SOURCE" -noout >/dev/null || die "私钥 PEM 文件无效。"
   if [[ -n "$AOP_CA_SOURCE" ]]; then
-    openssl x509 -in "$AOP_CA_SOURCE" -noout >/dev/null || die "Invalid AOP CA PEM file."
+    openssl x509 -in "$AOP_CA_SOURCE" -noout >/dev/null || die "AOP CA PEM 文件无效。"
   fi
 
   local certificate_key private_key
   certificate_key=$(openssl x509 -in "$CERT_SOURCE" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum)
   private_key=$(openssl pkey -in "$KEY_SOURCE" -pubout -outform DER | sha256sum)
-  [[ "$certificate_key" == "$private_key" ]] || die "The certificate and private key do not match."
+  [[ "$certificate_key" == "$private_key" ]] || die "源证书与私钥不匹配；请确认两者来自同一次 Cloudflare 证书创建。"
 
   local certificate_names
   certificate_names=$(openssl x509 -in "$CERT_SOURCE" -noout -ext subjectAltName 2>/dev/null || true)
   if [[ "$certificate_names" != *"DNS:${DOMAIN}"* && "$certificate_names" != *"DNS:*.${DOMAIN#*.}"* ]]; then
-    warn "Could not confirm that the certificate covers ${DOMAIN}. Check its SAN entries before continuing."
+    warn "无法确认源证书是否覆盖 ${DOMAIN}；继续前请在 Cloudflare 中核对证书主机名。"
   fi
 }
 
 install_nginx() {
+  info "正在安装并启用 Nginx 与证书校验依赖。"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   apt-get install -y --no-install-recommends nginx openssl ca-certificates curl
@@ -150,7 +150,7 @@ install_nginx() {
 
 configure_automatic_security_updates() {
   if [[ "$AUTO_SECURITY_UPDATES" == "ask" ]]; then
-    if confirm "Enable Debian unattended security updates (this can update and restart Nginx automatically)?"; then
+    if confirm "是否启用 Debian 无人值守安全更新？安全更新可能自动重启 Nginx"; then
       AUTO_SECURITY_UPDATES="yes"
     else
       AUTO_SECURITY_UPDATES="no"
@@ -165,9 +165,9 @@ APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 EOF
     systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
-    info "Enabled Debian unattended security updates."
+    info "已启用 Debian 无人值守安全更新。"
   else
-    info "Unattended-update settings were left unchanged."
+    info "未修改现有的自动更新设置。"
   fi
 }
 
@@ -177,15 +177,16 @@ detect_komari_data_directory() {
   if [[ -n "$current_data_directory" ]]; then
     KOMARI_DIRECTORY="$(dirname "$current_data_directory")"
     DATA_DIRECTORY="$current_data_directory"
-    info "Using the existing Komari data directory: ${DATA_DIRECTORY}"
+    info "检测到现有 Komari 数据目录：${DATA_DIRECTORY}"
   else
     DATA_DIRECTORY="${KOMARI_DIRECTORY}/data"
     mkdir -p "$DATA_DIRECTORY"
-    info "No existing Komari container found; using ${DATA_DIRECTORY}."
+    info "未检测到现有 Komari 容器；将使用数据目录：${DATA_DIRECTORY}"
   fi
 }
 
 write_certificate_files() {
+  info "正在安装 Cloudflare 源证书；私钥将以 0600 权限保存。"
   install -d -m 0750 "$CERT_DIRECTORY"
   install -m 0644 "$CERT_SOURCE" "${CERT_DIRECTORY}/origin.pem"
   install -m 0600 "$KEY_SOURCE" "${CERT_DIRECTORY}/origin.key"
@@ -195,6 +196,7 @@ write_certificate_files() {
 }
 
 write_nginx_configuration() {
+  info "正在生成仅监听 TCP 443 的 Nginx HTTPS 反向代理配置。"
   local candidate backup="" aop_directives=""
   if [[ -n "$AOP_CA_SOURCE" ]]; then
     aop_directives="    ssl_client_certificate ${CERT_DIRECTORY}/cloudflare-aop-ca.pem;
@@ -239,7 +241,7 @@ EOF
   if [[ -e "$NGINX_SITE" ]]; then
     backup="${NGINX_SITE}.bak.$(date +%Y%m%d%H%M%S)"
     cp -a "$NGINX_SITE" "$backup"
-    info "Backed up existing Nginx site to ${backup}."
+    info "已备份原有 Nginx 站点配置至：${backup}"
   fi
   install -m 0644 "$candidate" "$NGINX_SITE"
   rm -f "$candidate"
@@ -247,20 +249,21 @@ EOF
 
   if ! nginx -t; then
     [[ -n "$backup" ]] && cp -a "$backup" "$NGINX_SITE"
-    die "Nginx configuration test failed; previous site configuration was restored when available."
+    die "Nginx 配置校验失败；如存在旧配置，已恢复旧配置。"
   fi
 }
 
 migrate_komari_container() {
-  command -v docker >/dev/null 2>&1 || die "Docker is not installed."
+  command -v docker >/dev/null 2>&1 || die "未安装 Docker，无法继续。"
   systemctl is-active --quiet docker || systemctl enable --now docker
 
   local image backup_name=""
+  info "正在将 Komari 从公网 Docker 端口映射迁移为仅本机监听。"
   image="ghcr.io/komari-monitor/komari:latest"
   if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     image=$(docker inspect --format '{{.Config.Image}}' "$CONTAINER_NAME")
     backup_name="${CONTAINER_NAME}-before-nginx-$(date +%Y%m%d%H%M%S)"
-    info "Preserving the existing container as ${backup_name} for rollback."
+    info "将停止并保留现有容器为 ${backup_name}，可用于回滚。"
     docker stop "$CONTAINER_NAME"
     docker rename "$CONTAINER_NAME" "$backup_name"
   fi
@@ -272,18 +275,31 @@ migrate_komari_container() {
     -v "${DATA_DIRECTORY}:/app/data" \
     "$image"; then
     if [[ -n "$backup_name" ]]; then
-      warn "Restoring the prior Komari container."
+      warn "新容器创建失败，正在恢复原 Komari 容器。"
       docker rename "$backup_name" "$CONTAINER_NAME" || true
       docker start "$CONTAINER_NAME" || true
     fi
-    die "Could not create the replacement Komari container."
+    die "无法创建新的 Komari 容器。"
   fi
 
   local status_code
   status_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 http://127.0.0.1:25774/ || true)
-  [[ "$status_code" != "000" && -n "$status_code" ]] || die "Komari did not answer on 127.0.0.1:25774 after migration."
-  info "Komari local health check returned HTTP ${status_code}."
-  [[ -z "$backup_name" ]] || warn "Retained stopped rollback container: ${backup_name}"
+  [[ "$status_code" != "000" && -n "$status_code" ]] || die "迁移后 Komari 未响应本机地址 127.0.0.1:25774。"
+  info "Komari 本机连通性检查返回 HTTP ${status_code}。"
+  [[ -z "$backup_name" ]] || warn "已保留停止状态的回滚容器：${backup_name}"
+}
+
+print_change_summary() {
+  cat <<EOF
+
+即将执行以下操作：
+  1. 安装并启用 Nginx，且只为 Komari 配置 HTTPS TCP 443。
+  2. 将 Komari Docker 映射改为 127.0.0.1:25774:25774，移除其公网入口。
+  3. 保留现有 Komari 数据目录，不拉取新镜像，不删除数据。
+  4. 将原 Komari 容器改名并停止，以便必要时回滚。
+
+不会执行：打开防火墙端口、修改 SSH、输出私钥或上传任何凭据。
+EOF
 }
 
 main() {
@@ -292,11 +308,11 @@ main() {
   parse_arguments "$@"
   validate_certificate_pair
 
-  info "${SCRIPT_NAME} ${SCRIPT_VERSION}"
-  info "Target hostname: ${DOMAIN}"
-  info "Komari will be reachable only through Nginx on TCP 443; Docker will bind 25774 to loopback."
-  if ! confirm "Continue with Nginx setup and Komari port migration?"; then
-    die "Cancelled by user."
+  info "正在运行 ${SCRIPT_NAME} ${SCRIPT_VERSION}"
+  info "目标 Komari 域名：${DOMAIN}"
+  print_change_summary
+  if ! confirm "已确认 Cloudflare 小黄云已开启、证书文件无误、VPS 防火墙已放行 TCP 443；是否继续"; then
+    die "已取消，系统未开始修改。"
   fi
 
   install_nginx
@@ -309,18 +325,18 @@ main() {
 
   cat <<EOF
 
-Setup complete.
+配置完成。
 
-Next steps in Cloudflare:
-  1. Keep the DNS record for ${DOMAIN} proxied (orange cloud).
-  2. Set SSL/TLS encryption mode to Full (strict).
-  3. Enable Always Use HTTPS.
+请在 Cloudflare 完成以下检查：
+  1. 确认 ${DOMAIN} 的 DNS 记录保持“小黄云（已代理）”。
+  2. SSL/TLS 加密模式设为“完全（严格）/ Full (strict)”。
+  3. 开启“始终使用 HTTPS / Always Use HTTPS”。
 
-Open: https://${DOMAIN}
+现在访问：https://${DOMAIN}
 
-Only allow your existing SSH port plus TCP 443 in your VPS firewall. Do not open TCP 80, Komari's internal port, or its former public port.
+防火墙原则：仅放行原有 SSH 端口与 TCP 443；不要开放 TCP 80、Komari 容器内部端口或旧公网端口。
 EOF
-  [[ -z "$AOP_CA_SOURCE" ]] || echo 'Authenticated Origin Pulls is enabled in Nginx; confirm it is enabled for this hostname in Cloudflare.'
+  [[ -z "$AOP_CA_SOURCE" ]] || echo '提示：Nginx 已启用 Cloudflare AOP；请确认 Cloudflare 对该域名的 AOP 也已开启。'
 }
 
 main "$@"
