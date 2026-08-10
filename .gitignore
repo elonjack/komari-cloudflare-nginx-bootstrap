@@ -1,0 +1,7 @@
+# Never commit generated credentials or local overrides.
+*.pem
+*.key
+*.crt
+*.csr
+.env
+EOF
