@@ -10,7 +10,7 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="1.1.0"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
@@ -19,6 +19,7 @@ readonly CERT_DIRECTORY="/etc/nginx/ssl/komari"
 DOMAIN=""
 CERT_SOURCE=""
 KEY_SOURCE=""
+AOP_CA_SOURCE=""
 KOMARI_DIRECTORY="/opt/komari"
 CONTAINER_NAME="komari"
 AUTO_SECURITY_UPDATES="ask"
@@ -45,6 +46,8 @@ Required:
   --domain DOMAIN              Public hostname, for example komari.example.com
   --cert-file PATH             Cloudflare Origin Certificate PEM file
   --key-file PATH              Matching Cloudflare Origin private-key PEM file
+  --cloudflare-aop-ca-file PATH
+                              Enable Authenticated Origin Pulls using this CA PEM
 
 Options:
   --komari-dir PATH            Komari data parent directory (default: /opt/komari)
@@ -54,8 +57,9 @@ Options:
   --yes                        Do not ask for confirmation
   -h, --help                   Show this help
 
-The script does not create, upload, or print private keys. It keeps the old
-Komari container stopped under a timestamped backup name for rollback.
+The script does not create, upload, or print private keys. It exposes the
+Komari site through HTTPS only and keeps the old container stopped under a
+timestamped backup name for rollback.
 EOF
 }
 
@@ -91,6 +95,7 @@ parse_arguments() {
       --domain) DOMAIN=${2:-}; shift 2 ;;
       --cert-file) CERT_SOURCE=${2:-}; shift 2 ;;
       --key-file) KEY_SOURCE=${2:-}; shift 2 ;;
+      --cloudflare-aop-ca-file) AOP_CA_SOURCE=${2:-}; shift 2 ;;
       --komari-dir) KOMARI_DIRECTORY=${2:-}; shift 2 ;;
       --container-name) CONTAINER_NAME=${2:-}; shift 2 ;;
       --enable-security-updates) AUTO_SECURITY_UPDATES="yes"; shift ;;
@@ -111,6 +116,7 @@ parse_arguments() {
   [[ -n "$KEY_SOURCE" ]] || die "--key-file is required."
   [[ -r "$CERT_SOURCE" ]] || die "Certificate is not readable: $CERT_SOURCE"
   [[ -r "$KEY_SOURCE" ]] || die "Private key is not readable: $KEY_SOURCE"
+  [[ -z "$AOP_CA_SOURCE" || -r "$AOP_CA_SOURCE" ]] || die "AOP CA certificate is not readable: $AOP_CA_SOURCE"
   [[ "$KOMARI_DIRECTORY" == /* ]] || die "--komari-dir must be an absolute path."
   [[ "$CONTAINER_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || die "Invalid container name."
 }
@@ -119,6 +125,9 @@ validate_certificate_pair() {
   command -v openssl >/dev/null 2>&1 || die "openssl is required."
   openssl x509 -in "$CERT_SOURCE" -noout >/dev/null || die "Invalid certificate PEM file."
   openssl pkey -in "$KEY_SOURCE" -noout >/dev/null || die "Invalid private-key PEM file."
+  if [[ -n "$AOP_CA_SOURCE" ]]; then
+    openssl x509 -in "$AOP_CA_SOURCE" -noout >/dev/null || die "Invalid AOP CA PEM file."
+  fi
 
   local certificate_key private_key
   certificate_key=$(openssl x509 -in "$CERT_SOURCE" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum)
@@ -180,19 +189,19 @@ write_certificate_files() {
   install -d -m 0750 "$CERT_DIRECTORY"
   install -m 0644 "$CERT_SOURCE" "${CERT_DIRECTORY}/origin.pem"
   install -m 0600 "$KEY_SOURCE" "${CERT_DIRECTORY}/origin.key"
+  if [[ -n "$AOP_CA_SOURCE" ]]; then
+    install -m 0644 "$AOP_CA_SOURCE" "${CERT_DIRECTORY}/cloudflare-aop-ca.pem"
+  fi
 }
 
 write_nginx_configuration() {
-  local candidate backup=""
+  local candidate backup="" aop_directives=""
+  if [[ -n "$AOP_CA_SOURCE" ]]; then
+    aop_directives="    ssl_client_certificate ${CERT_DIRECTORY}/cloudflare-aop-ca.pem;
+    ssl_verify_client on;"
+  fi
   candidate=$(mktemp /etc/nginx/sites-available/komari.XXXXXX)
   cat > "$candidate" <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${DOMAIN};
-    return 301 https://\$host\$request_uri;
-}
-
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
@@ -202,7 +211,13 @@ server {
     ssl_certificate     ${CERT_DIRECTORY}/origin.pem;
     ssl_certificate_key ${CERT_DIRECTORY}/origin.key;
     ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
     server_tokens off;
+${aop_directives}
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header X-Frame-Options "DENY" always;
 
     location / {
         proxy_pass http://127.0.0.1:25774;
@@ -279,7 +294,7 @@ main() {
 
   info "${SCRIPT_NAME} ${SCRIPT_VERSION}"
   info "Target hostname: ${DOMAIN}"
-  info "Komari will be reachable only through Nginx on ports 80/443; Docker will bind 25774 to loopback."
+  info "Komari will be reachable only through Nginx on TCP 443; Docker will bind 25774 to loopback."
   if ! confirm "Continue with Nginx setup and Komari port migration?"; then
     die "Cancelled by user."
   fi
@@ -303,8 +318,9 @@ Next steps in Cloudflare:
 
 Open: https://${DOMAIN}
 
-Only allow your existing SSH port plus ports 80 and 443 in your VPS firewall. Do not reopen Komari's internal or former public port.
+Only allow your existing SSH port plus TCP 443 in your VPS firewall. Do not open TCP 80, Komari's internal port, or its former public port.
 EOF
+  [[ -z "$AOP_CA_SOURCE" ]] || echo 'Authenticated Origin Pulls is enabled in Nginx; confirm it is enabled for this hostname in Cloudflare.'
 }
 
 main "$@"
