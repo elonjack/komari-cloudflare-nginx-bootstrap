@@ -21,33 +21,60 @@ It never prints certificate keys, opens firewall ports, disables a firewall, cha
 
 1. In Cloudflare DNS, create a hostname such as `komari.example.com` as an `A` record pointing at the VPS and keep it **proxied** (orange cloud).
 2. In **SSL/TLS → Origin Server → Create certificate**, use “Cloudflare generates a private key and a CSR”. Ensure the certificate lists your hostname or a matching one-level wildcard (for example, `*.example.com` covers `komari.example.com`). Create the certificate and copy both output blocks before leaving the page.
-3. On the VPS, create two files. Do not paste these values into shell history or commit them to Git.
+3. On the VPS, save the two Cloudflare values to files. Do not paste either value into shell history or commit it to Git.
+
+   Create the protected directory and open the certificate file:
 
    ```bash
    install -d -m 0700 /root/komari-origin
    nano /root/komari-origin/origin.pem
-   nano /root/komari-origin/origin.key
-   chmod 600 /root/komari-origin/origin.key
    ```
 
-   Paste the Origin Certificate into `origin.pem` and the private key into `origin.key`.
+   Paste the entire **Origin Certificate**, including its `BEGIN CERTIFICATE` and `END CERTIFICATE` lines. Save in Nano with `Ctrl+O`, press `Enter` to confirm the file name, then exit with `Ctrl+X`.
+
+   Open the private-key file:
+
+   ```bash
+   nano /root/komari-origin/origin.key
+   ```
+
+   Paste the entire **Private Key**, including its `BEGIN PRIVATE KEY` and `END PRIVATE KEY` lines. Again use `Ctrl+O`, `Enter`, then `Ctrl+X` to save and exit. Finally restrict the key file:
+
+   ```bash
+   chmod 600 /root/komari-origin/origin.key
+   ls -l /root/komari-origin
+   ```
+
+   The final command should show both files. Do not post their contents anywhere.
 
 4. Confirm that your existing SSH port plus **TCP 443** are permitted by the VPS provider and host firewall. Do **not** open TCP 80, Komari's internal port, or its former public port.
 
 ## Run
 
-Download a released copy of the script, inspect it, then run it as root:
+Run these commands as root. They download the current script, make it executable, and start its interactive setup:
 
 ```bash
+mkdir -p /root/komari-bootstrap
+cd /root/komari-bootstrap
+curl --proto '=https' --tlsv1.2 -fLO https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh
 chmod 700 komari-cloudflare-nginx.sh
+./komari-cloudflare-nginx.sh \
+  --cert-file /root/komari-origin/origin.pem \
+  --key-file /root/komari-origin/origin.key \
+  --enable-security-updates
+```
+
+The script asks for the public Komari domain. Type your own domain there, then press `Enter`. It then asks for confirmation before it changes Nginx or replaces the running Komari container. Enter `y` to continue. Do not add `--yes` unless you have already checked every path and option.
+
+If you prefer not to use the interactive domain prompt, replace `komari.example.com` below with your own domain, then run:
+
+```bash
 ./komari-cloudflare-nginx.sh \
   --domain komari.example.com \
   --cert-file /root/komari-origin/origin.pem \
   --key-file /root/komari-origin/origin.key \
   --enable-security-updates
 ```
-
-It asks for confirmation before it changes Nginx or replaces the running Komari container. Add `--yes` only after reading the script and confirming the paths.
 
 ## After the script completes
 
