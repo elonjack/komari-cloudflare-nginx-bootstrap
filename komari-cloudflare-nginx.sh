@@ -328,9 +328,9 @@ main() {
 配置完成。
 
 请在 Cloudflare 完成以下检查：
-  1. 确认 ${DOMAIN} 的 DNS 记录保持“小黄云（已代理）”。
-  2. SSL/TLS 加密模式设为“完全（严格）/ Full (strict)”。
-  3. 开启“始终使用 HTTPS / Always Use HTTPS”。
+  1. 确认 ${DOMAIN} 的 DNS 记录保持【小黄云（已代理）】。
+  2. SSL/TLS 加密模式设为【完全（严格）/ Full (strict)】。
+  3. 开启【始终使用 HTTPS / Always Use HTTPS】。
 
 现在访问：https://${DOMAIN}
 
