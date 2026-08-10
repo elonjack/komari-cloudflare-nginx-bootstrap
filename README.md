@@ -138,20 +138,56 @@ https://你的 Komari 子域名
 
 小黄云会隐藏常规 DNS 查询中的源站 IP，但本身不阻止知道源站 IP 的人直接请求 HTTPS。
 
-Cloudflare **Authenticated Origin Pulls（AOP）** 会让 Nginx 只接受携带 Cloudflare 客户端证书的 HTTPS 请求，从而阻止绕过 Cloudflare 的直接访问。建议先完成上面的基础部署并确认域名可访问，再参考 [Cloudflare Global AOP 官方教程](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/set-up/global/) 配置。
+Cloudflare **Authenticated Origin Pulls（AOP）** 会让 Nginx 只接受携带 Cloudflare 客户端证书的 HTTPS 请求，从而阻止绕过 Cloudflare 的直接访问。请先完成上面的基础部署，并确认 HTTPS 域名已经能正常打开后，再按以下步骤操作。
 
-下载并保存 AOP 的公开 CA PEM 后，使用下面形式运行脚本：
+### 1. 下载 Cloudflare AOP 公共 CA 证书
+
+在 VPS 的 root SSH 终端原样执行：
 
 ```bash
+curl --proto '=https' --tlsv1.2 -fLo /root/komari-origin/cloudflare-aop-ca.pem \
+  https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem
+
+openssl x509 -in /root/komari-origin/cloudflare-aop-ca.pem -noout -subject -issuer
+```
+
+这是 Cloudflare 的**公共 CA 证书**，不是你的源证书，也不是私钥；可以保存到该路径。
+
+### 2. 在 Cloudflare 开启全局 AOP
+
+Cloudflare 域名后台 → **SSL/TLS → 源服务器** → 找到 **Authenticated Origin Pulls / 经过身份验证的源站拉取** 标签页 → 在 **Global / 全局** 区域打开开关。
+
+先开启 Cloudflare 的开关是安全的：此时现有 Nginx 仍会正常响应。不要选择“上传自己的证书”或“按主机名”；小白使用 **Global / 全局** 即可。
+
+### 3. 重新执行脚本，让 Nginx 强制验证 AOP
+
+在 VPS 中执行以下命令。它会重新下载最新脚本；运行时仍会询问你的域名，因此不要把域名写进命令：
+
+```bash
+cd /root/komari-bootstrap
+curl --proto '=https' --tlsv1.2 -fLO https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh
+chmod 700 komari-cloudflare-nginx.sh
+
 ./komari-cloudflare-nginx.sh \
-  --domain komari.example.com \
   --cert-file /root/komari-origin/origin.pem \
   --key-file /root/komari-origin/origin.key \
   --cloudflare-aop-ca-file /root/komari-origin/cloudflare-aop-ca.pem \
   --enable-security-updates
 ```
 
-仅在 Cloudflare 已启用 AOP 后使用该选项；否则 Cloudflare 无法与源站完成 TLS 握手。
+脚本询问域名时输入你的 Komari 子域名；在操作确认处输入 `y`。脚本会短暂重载 Nginx，并保留现有容器作为回滚备份。
+
+### 4. 验证
+
+先确认你的 HTTPS 域名仍能正常打开。随后在 VPS 上执行：
+
+```bash
+curl -kI --connect-timeout 5 https://你的VPS公网IP || true
+```
+
+预期是直接 IP 的 HTTPS 请求失败或被拒绝；而通过 Cloudflare 域名的 HTTPS 访问正常。若域名出现 `521` 或 `525`，先不要删除证书，执行 `nginx -t` 和 `systemctl status nginx --no-pager`，并保留当前 SSH 会话后再排查。
+
+详细原理见 [Cloudflare Global AOP 官方教程](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/set-up/global/)。
 
 ## 安全清单
 
