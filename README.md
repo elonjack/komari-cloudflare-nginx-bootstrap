@@ -118,11 +118,15 @@ chmod 700 komari-cloudflare-nginx.sh
 
 ## 脚本完成后
 
-在 Cloudflare 中确认：
+在 Cloudflare 中按以下路径逐项确认：
 
-1. DNS 记录仍为橙色小黄云。
-2. **SSL/TLS → 概述**的加密模式为 **完全（严格）/ Full (strict)**。
-3. 开启 **始终使用 HTTPS / Always Use HTTPS**。HTTP 会在 Cloudflare 边缘跳转，VPS 不需要开放 TCP `80`。
+1. **DNS → 记录**：Komari 子域名的云朵必须为橙色，即【已代理】。
+2. **SSL/TLS → 概述**：加密模式必须为【完全（严格）/ Full (strict)】。
+3. **SSL/TLS → 边缘证书**：向下找到【始终使用 HTTPS】卡片，打开右侧开关；开关显示绿色且带勾即为成功。
+
+【始终使用 HTTPS】由 Cloudflare 在边缘将 `http://` 请求跳转到 `https://`。本脚本不会在 VPS 的 Nginx 中配置 HTTP→HTTPS 跳转，且不会让 Komari 监听 TCP `80`，因此两者不会造成重定向循环。开启此功能后，VPS 只需开放 TCP `443`。
+
+注意：该开关对当前 Cloudflare 域名下的所有主机名生效；若其中还有仅支持 HTTP 的其他网站或服务，请先不要开启。
 
 然后访问：
 
