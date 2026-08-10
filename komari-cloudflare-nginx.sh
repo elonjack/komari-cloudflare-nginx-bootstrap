@@ -10,7 +10,7 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.1.1"
+readonly SCRIPT_VERSION="1.1.2"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
@@ -282,10 +282,27 @@ migrate_komari_container() {
     die "无法创建新的 Komari 容器。"
   fi
 
-  local status_code
-  status_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 http://127.0.0.1:25774/ || true)
-  [[ "$status_code" != "000" && -n "$status_code" ]] || die "迁移后 Komari 未响应本机地址 127.0.0.1:25774。"
-  info "Komari 本机连通性检查返回 HTTP ${status_code}。"
+  local status_code="" attempt
+  for ((attempt = 1; attempt <= 12; attempt++)); do
+    status_code=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 http://127.0.0.1:25774/ || true)
+    if [[ "$status_code" != "000" && -n "$status_code" ]]; then
+      info "Komari 已就绪，本机连通性检查返回 HTTP ${status_code}。"
+      break
+    fi
+    info "Komari 正在初始化；第 ${attempt}/12 次检查尚未响应，5 秒后重试。"
+    sleep 5
+  done
+
+  if [[ "$status_code" == "000" || -z "$status_code" ]]; then
+    if [[ -n "$backup_name" ]]; then
+      warn "新 Komari 容器在约 60 秒内未就绪，正在恢复原容器。"
+      docker stop "$CONTAINER_NAME" || true
+      docker rm "$CONTAINER_NAME" || true
+      docker rename "$backup_name" "$CONTAINER_NAME" || true
+      docker start "$CONTAINER_NAME" || true
+    fi
+    die "Komari 在初始化等待期内未响应 127.0.0.1:25774；请使用 docker logs komari 查看原因。"
+  fi
   [[ -z "$backup_name" ]] || warn "已保留停止状态的回滚容器：${backup_name}"
 }
 
