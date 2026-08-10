@@ -10,7 +10,7 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.1.2"
+readonly SCRIPT_VERSION="1.2.0"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
@@ -25,14 +25,33 @@ CONTAINER_NAME="komari"
 AUTO_SECURITY_UPDATES="ask"
 ASSUME_YES=0
 
-log() { printf '[%s] %s\n' "$1" "$2"; }
-info() { log '信息' "$*"; }
-warn() { log '警告' "$*" >&2; }
-die() { log '错误' "$*" >&2; exit 1; }
+# 仅在交互式终端中输出颜色；重定向到日志或 CI 时保持纯文本。
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  readonly COLOR_RESET=$'\033[0m'
+  readonly COLOR_CYAN=$'\033[36m'
+  readonly COLOR_GREEN=$'\033[32m'
+  readonly COLOR_YELLOW=$'\033[33m'
+  readonly COLOR_RED=$'\033[31m'
+else
+  readonly COLOR_RESET=''
+  readonly COLOR_CYAN=''
+  readonly COLOR_GREEN=''
+  readonly COLOR_YELLOW=''
+  readonly COLOR_RED=''
+fi
+
+log() {
+  local color=$1 level=$2 message=$3
+  printf '%b[%s]%b %s\n' "$color" "$level" "$COLOR_RESET" "$message"
+}
+info() { log "$COLOR_CYAN" '信息' "$*"; }
+success() { log "$COLOR_GREEN" '完成' "$*"; }
+warn() { log "$COLOR_YELLOW" '警告' "$*" >&2; }
+die() { log "$COLOR_RED" '错误' "$*" >&2; exit 1; }
 
 on_error() {
   local exit_code=$?
-  log '错误' "脚本在第 ${BASH_LINENO[0]} 行失败（退出码 ${exit_code}）。未输出任何证书私钥或凭据。"
+  log "$COLOR_RED" '错误' "脚本在第 ${BASH_LINENO[0]} 行失败（退出码 ${exit_code}）。未输出任何证书私钥或凭据。" >&2
   exit "$exit_code"
 }
 trap on_error ERR
@@ -42,12 +61,14 @@ usage() {
 用法：
   ${SCRIPT_NAME} --domain 域名 --cert-file 路径 --key-file 路径 [选项]
 
-必填参数：
+主要参数：
   --domain 域名                对外访问域名，例如 komari.example.com
-  --cert-file 路径             Cloudflare 源证书 PEM 文件
-  --key-file 路径              与源证书匹配的私钥 PEM 文件
+  --cert-file 路径             Cloudflare 源证书 PEM 文件（默认：/root/komari-origin/origin.pem）
+  --key-file 路径              与源证书匹配的私钥 PEM 文件（默认：/root/komari-origin/origin.key）
   --cloudflare-aop-ca-file PATH
                               使用此 CA PEM 启用 Cloudflare AOP
+  --enable-aop                 使用默认 AOP CA 路径启用 AOP：
+                              /root/komari-origin/cloudflare-aop-ca.pem
 
 可选参数：
   --komari-dir 路径            Komari 数据目录的上级目录（默认：/opt/komari）
@@ -95,6 +116,7 @@ parse_arguments() {
       --cert-file) CERT_SOURCE=${2:-}; shift 2 ;;
       --key-file) KEY_SOURCE=${2:-}; shift 2 ;;
       --cloudflare-aop-ca-file) AOP_CA_SOURCE=${2:-}; shift 2 ;;
+      --enable-aop) AOP_CA_SOURCE="/root/komari-origin/cloudflare-aop-ca.pem"; shift ;;
       --komari-dir) KOMARI_DIRECTORY=${2:-}; shift 2 ;;
       --container-name) CONTAINER_NAME=${2:-}; shift 2 ;;
       --enable-security-updates) AUTO_SECURITY_UPDATES="yes"; shift ;;
@@ -104,6 +126,10 @@ parse_arguments() {
       *) die "未知参数：$1；使用 --help 查看帮助。" ;;
     esac
   done
+
+  # 使用 README 推荐的保存路径时，无须每次重复输入证书路径。
+  [[ -n "$CERT_SOURCE" ]] || CERT_SOURCE="/root/komari-origin/origin.pem"
+  [[ -n "$KEY_SOURCE" ]] || KEY_SOURCE="/root/komari-origin/origin.key"
 
   if [[ -z "$DOMAIN" && "$ASSUME_YES" -eq 0 ]]; then
     read -r -p "请输入 Komari 对外域名（例如 komari.example.com）：" DOMAIN
@@ -340,9 +366,8 @@ main() {
   migrate_komari_container
   systemctl reload nginx
 
+  success "配置完成。"
   cat <<EOF
-
-配置完成。
 
 请在 Cloudflare 完成以下检查：
   1. 确认 ${DOMAIN} 的 DNS 记录保持【小黄云（已代理）】。
@@ -353,7 +378,7 @@ main() {
 
 防火墙原则：仅放行原有 SSH 端口与 TCP 443；不要开放 TCP 80、Komari 容器内部端口或旧公网端口。
 EOF
-  [[ -z "$AOP_CA_SOURCE" ]] || echo '提示：Nginx 已启用 Cloudflare AOP；请确认 Cloudflare 对该域名的 AOP 也已开启。'
+  [[ -z "$AOP_CA_SOURCE" ]] || info 'Nginx 已启用 Cloudflare AOP；请确认 Cloudflare 对该域名的 AOP 也已开启。'
 }
 
 main "$@"

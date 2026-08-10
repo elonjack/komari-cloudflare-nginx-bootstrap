@@ -86,6 +86,18 @@ ls -l /root/komari-origin
 
 ## 一键执行
 
+### 短命令（推荐）
+
+如果你已按本文前面的步骤，把源证书和私钥保存为 `/root/komari-origin/origin.pem`、`/root/komari-origin/origin.key`，可在 root SSH 终端原样复制这一整行：
+
+```bash
+mkdir -p /root/komari-bootstrap && curl --proto '=https' --tlsv1.2 -fLo /root/komari-bootstrap/komari-cloudflare-nginx.sh https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh && bash /root/komari-bootstrap/komari-cloudflare-nginx.sh
+```
+
+它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`），并交互询问域名和是否开启 Debian 安全更新。下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
+
+### 完整、可审计写法
+
 以下命令可以**原样复制**到 VPS 的 root SSH 终端：
 
 ```bash
@@ -161,7 +173,15 @@ Cloudflare 域名后台 → **SSL/TLS → 源服务器** → 找到 **Authentica
 
 ### 3. 重新执行脚本，让 Nginx 强制验证 AOP
 
-在 VPS 中执行以下命令。它会重新下载最新脚本；运行时仍会询问你的域名，因此不要把域名写进命令：
+在 VPS 中执行以下**短命令**。它会重新下载最新脚本；运行时仍会询问你的域名，因此不要把域名写进命令：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fLo /root/komari-bootstrap/komari-cloudflare-nginx.sh https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh && bash /root/komari-bootstrap/komari-cloudflare-nginx.sh --enable-aop
+```
+
+`--enable-aop` 等同于使用已下载的 `/root/komari-origin/cloudflare-aop-ca.pem`。它会继续使用默认源证书路径；自动安全更新则由脚本交互询问，不会擅自开启。
+
+如你的证书不在默认路径，才使用下面的完整写法：
 
 ```bash
 cd /root/komari-bootstrap
