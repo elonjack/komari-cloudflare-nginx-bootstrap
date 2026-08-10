@@ -10,7 +10,7 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.1.0"
+readonly SCRIPT_VERSION="1.1.1"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
