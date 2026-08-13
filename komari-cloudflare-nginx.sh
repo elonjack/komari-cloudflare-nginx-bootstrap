@@ -10,7 +10,7 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.3.0"
+readonly SCRIPT_VERSION="1.3.1"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
@@ -52,6 +52,11 @@ info() { log "$COLOR_CYAN" '信息' "$*"; }
 success() { log "$COLOR_GREEN" '完成' "$*"; }
 warn() { log "$COLOR_YELLOW" '警告' "$*" >&2; }
 die() { log "$COLOR_RED" '错误' "$*" >&2; exit 1; }
+
+show_banner() {
+  printf '\n%bKomari + Cloudflare + Nginx 脚本%b\n' "$COLOR_CYAN" "$COLOR_RESET"
+  printf '%b[版本]%b v%s\n' "$COLOR_CYAN" "$COLOR_RESET" "$SCRIPT_VERSION"
+}
 
 on_error() {
   local exit_code=$?
@@ -108,7 +113,8 @@ confirm() {
   if [[ "$ASSUME_YES" -eq 1 ]]; then
     return 0
   fi
-  read -r -p "$prompt [y/N，直接回车=否]：" answer
+  printf '%b%s%b' "$COLOR_YELLOW" "$prompt [y/N，直接回车=否]：" "$COLOR_RESET" >&2
+  read -r answer
   [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
@@ -150,15 +156,10 @@ choose_mode() {
   [[ -n "$MODE" ]] && return 0
   [[ "$ASSUME_YES" -eq 0 ]] || die "使用 --yes 时必须同时指定 --install 或 --update。"
 
-  cat <<EOF
-
-请选择操作：
-  1) 安装或重新加固 Komari（Nginx、Cloudflare 源证书、可选 AOP）
-  2) 安全更新已有 Komari 面板（保持本机端口绑定和数据目录）
-  0) 退出
-EOF
+  printf '\n%b[请选择操作]\n\n  1) 安装或重新加固 Komari（Nginx、Cloudflare 源证书、可选 AOP）\n  2) 安全更新已有 Komari 面板（保持本机端口绑定和数据目录）\n  0) 退出\n%b' "$COLOR_YELLOW" "$COLOR_RESET"
   local choice
-  read -r -p "请输入 1、2 或 0：" choice
+  printf '%b请输入 1、2 或 0：%b' "$COLOR_YELLOW" "$COLOR_RESET" >&2
+  read -r choice
   case "$choice" in
     1) MODE="install" ;;
     2) MODE="update" ;;
@@ -173,7 +174,8 @@ validate_install_arguments() {
   [[ -n "$KEY_SOURCE" ]] || KEY_SOURCE="/root/komari-origin/origin.key"
 
   if [[ -z "$DOMAIN" && "$ASSUME_YES" -eq 0 ]]; then
-    read -r -p "请输入 Komari 对外域名（例如 komari.example.com）：" DOMAIN
+    printf '%b请输入 Komari 对外域名（例如 komari.example.com）：%b' "$COLOR_YELLOW" "$COLOR_RESET" >&2
+    read -r DOMAIN
   fi
   [[ -n "$DOMAIN" ]] || die "必须提供 --domain，或在交互提示中输入域名。"
   DOMAIN=${DOMAIN,,}
@@ -507,7 +509,6 @@ EOF
 run_install() {
   validate_install_arguments
   validate_certificate_pair
-  info "正在运行 ${SCRIPT_NAME} ${SCRIPT_VERSION}"
   info "已选择：安装或重新加固 Komari。"
   info "目标 Komari 域名：${DOMAIN}"
   print_change_summary
@@ -542,13 +543,13 @@ main() {
   require_root
   require_debian
   parse_arguments "$@"
+  show_banner
   choose_mode
 
   case "$MODE" in
     install) run_install ;;
     update)
       [[ -z "$DOMAIN$CERT_SOURCE$KEY_SOURCE$AOP_CA_SOURCE" ]] || warn "更新模式不使用域名或证书参数；将保留现有 Nginx 与 AOP 配置。"
-      info "正在运行 ${SCRIPT_NAME} ${SCRIPT_VERSION}"
       info "已选择：安全更新 Komari 面板。"
       update_komari_panel
       ;;

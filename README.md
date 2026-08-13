@@ -96,7 +96,7 @@ ls -l /root/komari-origin
 mkdir -p /root/komari-bootstrap && curl --proto '=https' --tlsv1.2 -fLo /root/komari-bootstrap/komari-cloudflare-nginx.sh https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh && bash /root/komari-bootstrap/komari-cloudflare-nginx.sh
 ```
 
-它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`），然后显示菜单：选择 `1` 是安装/重新加固，选择 `2` 是安全更新已有面板。下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
+它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`）。每次执行都会覆盖下载为仓库的最新版；脚本顶部会先显示版本号。随后显示菜单：选择 `1` 是安装/重新加固，选择 `2` 是安全更新已有面板。需要你输入内容的提示为黄色；下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
 
 ### 完整、可审计写法
 
