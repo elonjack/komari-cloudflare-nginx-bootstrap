@@ -1,4 +1,4 @@
-# Komari + Cloudflare + Nginx 安全反向代理脚本
+# Komari + Cloudflare + Nginx 安全反向代理与更新脚本
 
 适用于已用 Docker 运行 Komari 面板的 **Debian 13** 服务器。
 
@@ -11,6 +11,7 @@
 - 只为 Komari 配置 HTTPS `443`；不创建 Komari 的 HTTP `80` 入口。
 - 保留原 Komari 数据目录，不拉取新镜像，也不删除数据。
 - 停止并重命名旧 Komari 容器，保留为可回滚备份。
+- 提供独立的“安全更新面板”选项：拉取官方最新镜像、保留本机端口绑定，并自动创建更新前数据归档。
 - 可选启用 Debian 无人值守**安全更新**，包含 Nginx 安全补丁。
 - 在完成前校验 Nginx 配置，最多等待约 60 秒检查本机 Komari 是否完成初始化；若新容器未就绪，会自动恢复旧容器。
 
@@ -20,6 +21,7 @@
 - 不会打开防火墙端口、关闭防火墙或修改 SSH 设置。
 - 不会删除原 Komari 数据或直接删除旧容器。
 - 不会自动在 Cloudflare 创建 DNS 记录或证书。
+- 不会在未经确认的情况下更新 Komari 镜像。
 
 ## 开始前准备
 
@@ -94,7 +96,7 @@ ls -l /root/komari-origin
 mkdir -p /root/komari-bootstrap && curl --proto '=https' --tlsv1.2 -fLo /root/komari-bootstrap/komari-cloudflare-nginx.sh https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh && bash /root/komari-bootstrap/komari-cloudflare-nginx.sh
 ```
 
-它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`），并交互询问域名和是否开启 Debian 安全更新。下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
+它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`），然后显示菜单：选择 `1` 是安装/重新加固，选择 `2` 是安全更新已有面板。下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
 
 ### 完整、可审计写法
 
@@ -106,7 +108,7 @@ cd /root/komari-bootstrap
 curl --proto '=https' --tlsv1.2 -fLO https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh
 chmod 700 komari-cloudflare-nginx.sh
 
-./komari-cloudflare-nginx.sh \
+./komari-cloudflare-nginx.sh --install \
   --cert-file /root/komari-origin/origin.pem \
   --key-file /root/komari-origin/origin.key \
   --enable-security-updates
@@ -121,12 +123,42 @@ chmod 700 komari-cloudflare-nginx.sh
 将下面的 `komari.example.com` 替换为自己的域名后再执行；除此之外不要修改：
 
 ```bash
-./komari-cloudflare-nginx.sh \
+./komari-cloudflare-nginx.sh --install \
   --domain komari.example.com \
   --cert-file /root/komari-origin/origin.pem \
   --key-file /root/komari-origin/origin.key \
   --enable-security-updates
 ```
+
+## 更新已有 Komari 面板
+
+此功能用于本仓库脚本已经部署好的 **Komari 面板 Docker 容器**，不是用于更新各台 VPS 上的 Agent 探针。它采用官方“拉取新镜像 → 重建容器 → 保留原数据目录”的思路，但固定使用安全端口映射 `127.0.0.1:25774:25774`，不会重新暴露公网 `25774` 端口。
+
+更新前，请先在 Komari 面板的 **设置 → 账户** 下载一份官方备份，并保持当前 SSH 会话不要关闭。
+
+在 VPS root SSH 终端执行：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fLo /root/komari-bootstrap/komari-cloudflare-nginx.sh https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh && bash /root/komari-bootstrap/komari-cloudflare-nginx.sh
+```
+
+菜单出现后输入 `2`，再在确认提示输入 `y`。更新脚本会：
+
+1. 拉取官方 `ghcr.io/komari-monitor/komari:latest` 镜像。
+2. 如果本机已经是该镜像版本，则不重启面板。
+3. 停止面板后，将当前 Docker 数据目录归档到 `/root/komari-backups/`，文件仅 root 可读。
+4. 用新镜像重建容器，仍只绑定 `127.0.0.1:25774:25774`。
+5. 最多等待约 60 秒；新版本无法启动时，自动恢复归档数据与旧容器。
+
+成功后先用原 HTTPS 域名登录，确认节点与历史数据正常。旧容器会保留为 `komari-before-update-时间戳`，先保留一两天；确认稳定后才可自行删除。
+
+也可以直接进入更新流程：
+
+```bash
+bash /root/komari-bootstrap/komari-cloudflare-nginx.sh --update
+```
+
+更新模式会拒绝非本机 `127.0.0.1:25774` 的 Docker 端口映射。若它报端口映射不符合要求，选择菜单 `1` 重新加固，而不是手动把 `-p 25774:25774` 加回去。
 
 ## 脚本完成后
 
@@ -188,7 +220,7 @@ cd /root/komari-bootstrap
 curl --proto '=https' --tlsv1.2 -fLO https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh
 chmod 700 komari-cloudflare-nginx.sh
 
-./komari-cloudflare-nginx.sh \
+./komari-cloudflare-nginx.sh --install \
   --cert-file /root/komari-origin/origin.pem \
   --key-file /root/komari-origin/origin.key \
   --cloudflare-aop-ca-file /root/komari-origin/cloudflare-aop-ca.pem \
@@ -219,7 +251,7 @@ curl -kI --connect-timeout 5 https://你的VPS公网IP || true
 
 ## 回滚
 
-脚本会保留一个停止状态的旧容器，名称类似：
+安装/重新加固时会保留一个停止状态的旧容器，名称类似：
 
 ```text
 komari-before-nginx-时间戳
@@ -234,7 +266,7 @@ docker rename 旧容器名称 komari
 docker start komari
 ```
 
-这会恢复原来的 Docker 端口映射，不会删除 Komari 数据目录。
+注意：这是安装/加固阶段的旧容器，可能仍含旧的公网端口映射；不要在未核对 `docker port 旧容器名称` 前直接恢复它。更新失败时脚本会自动恢复更新前数据和旧容器，通常不需要手动执行本节命令。
 
 ## 验证命令
 
