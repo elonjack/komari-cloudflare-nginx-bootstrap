@@ -63,7 +63,7 @@ trap on_error ERR
 usage() {
   cat <<EOF
 用法：
-  ${SCRIPT_NAME}                     # 显示“安装/更新”菜单
+  ${SCRIPT_NAME}                     # 显示安装/更新菜单
   ${SCRIPT_NAME} --install [选项]     # 安装或重新加固
   ${SCRIPT_NAME} --update [选项]      # 安全更新已有 Komari 面板
 
@@ -79,8 +79,8 @@ usage() {
 可选参数：
   --komari-dir 路径            Komari 数据目录的上级目录（默认：/opt/komari）
   --container-name 名称        现有 Komari 容器名称（默认：komari）
-  --install                    直接进入“安装或重新加固”流程
-  --update                     直接进入“更新面板”流程
+  --install                    直接进入安装或重新加固流程
+  --update                     直接进入更新面板流程
   --enable-security-updates    启用 Debian 无人值守安全更新（包含 Nginx）
   --disable-security-updates   不修改现有的自动更新设置
   --yes                        跳过交互确认；仅限已核对所有参数时使用
@@ -379,16 +379,16 @@ migrate_komari_container() {
 assert_update_prerequisites() {
   require_docker
   command -v curl >/dev/null 2>&1 || die "缺少 curl，无法进行本机健康检查。"
-  docker inspect "$CONTAINER_NAME" >/dev/null 2>&1 || die "未找到名为 ${CONTAINER_NAME} 的 Komari 容器；请改选“安装或重新加固”。"
+  docker inspect "$CONTAINER_NAME" >/dev/null 2>&1 || die "未找到名为 ${CONTAINER_NAME} 的 Komari 容器；请改选安装或重新加固。"
   detect_komari_data_directory
   [[ -d "$DATA_DIRECTORY" ]] || die "Komari 数据目录不存在：${DATA_DIRECTORY}"
   [[ "$DATA_DIRECTORY" != "/" ]] || die "拒绝将根目录作为 Komari 数据目录。"
 
   local port_mapping
   port_mapping=$(docker port "$CONTAINER_NAME" 25774/tcp 2>/dev/null || true)
-  [[ "$port_mapping" == "127.0.0.1:25774" ]] || die "为避免重新暴露公网端口，更新只接受 127.0.0.1:25774:25774 映射；当前为：${port_mapping:-未检测到}。请改选“安装或重新加固”修正后再更新。"
+  [[ "$port_mapping" == "127.0.0.1:25774" ]] || die "为避免重新暴露公网端口，更新只接受 127.0.0.1:25774:25774 映射；当前为：${port_mapping:-未检测到}。请改选安装或重新加固修正后再更新。"
 
-  command -v nginx >/dev/null 2>&1 || die "未找到 Nginx；请改选“安装或重新加固”。"
+  command -v nginx >/dev/null 2>&1 || die "未找到 Nginx；请改选安装或重新加固。"
   nginx -t >/dev/null || die "Nginx 配置校验失败；更新前请先修复 Nginx。"
   systemctl is-active --quiet nginx || die "Nginx 当前未运行；更新前请先修复并启动 Nginx。"
 }
@@ -440,7 +440,7 @@ print_update_summary() {
   3. 停止面板后，在 ${KOMARI_BACKUP_DIRECTORY} 创建一份本机数据归档。
   4. 保留停止状态的旧容器；若新版本未在约 60 秒内就绪，将自动恢复数据和旧容器。
 
-开始前：请先在 Komari 面板“设置 → 账户”下载一份官方备份，并保留当前 SSH 会话。
+开始前：请先在 Komari 面板的 设置 → 账户 下载一份官方备份，并保留当前 SSH 会话。
 EOF
 }
 
