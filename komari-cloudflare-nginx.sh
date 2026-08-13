@@ -10,7 +10,7 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.3.1"
+readonly SCRIPT_VERSION="1.4.0"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
@@ -71,6 +71,7 @@ usage() {
   ${SCRIPT_NAME}                     # 显示安装/更新菜单
   ${SCRIPT_NAME} --install [选项]     # 安装或重新加固
   ${SCRIPT_NAME} --update [选项]      # 安全更新已有 Komari 面板
+  ${SCRIPT_NAME} --cleanup             # 清理已确认的旧回滚容器
 
 主要参数：
   --domain 域名                对外访问域名，例如 komari.example.com
@@ -86,9 +87,10 @@ usage() {
   --container-name 名称        现有 Komari 容器名称（默认：komari）
   --install                    直接进入安装或重新加固流程
   --update                     直接进入更新面板流程
+  --cleanup                    交互式清理已停止的旧回滚容器
   --enable-security-updates    启用 Debian 无人值守安全更新（包含 Nginx）
   --disable-security-updates   不修改现有的自动更新设置
-  --yes                        跳过交互确认；仅限已核对所有参数时使用
+  --yes                        跳过安装/更新确认；清理旧容器时不可使用
   -h, --help                   显示本帮助
 
 更新流程会从官方镜像仓库拉取 latest，并始终保持 127.0.0.1:25774 端口绑定；
@@ -135,6 +137,7 @@ parse_arguments() {
       --container-name) CONTAINER_NAME=${2:-}; shift 2 ;;
       --install) MODE="install"; shift ;;
       --update) MODE="update"; shift ;;
+      --cleanup) MODE="cleanup"; shift ;;
       --enable-security-updates) AUTO_SECURITY_UPDATES="yes"; shift ;;
       --disable-security-updates) AUTO_SECURITY_UPDATES="no"; shift ;;
       --yes) ASSUME_YES=1; shift ;;
@@ -156,13 +159,14 @@ choose_mode() {
   [[ -n "$MODE" ]] && return 0
   [[ "$ASSUME_YES" -eq 0 ]] || die "使用 --yes 时必须同时指定 --install 或 --update。"
 
-  printf '\n%b[请选择操作]\n\n  1) 安装或重新加固 Komari（Nginx、Cloudflare 源证书、可选 AOP）\n  2) 安全更新已有 Komari 面板（保持本机端口绑定和数据目录）\n  0) 退出\n%b' "$COLOR_YELLOW" "$COLOR_RESET"
+  printf '\n%b[请选择操作]\n\n  1) 安装或重新加固 Komari（Nginx、Cloudflare 源证书、可选 AOP）\n  2) 安全更新已有 Komari 面板（保持本机端口绑定和数据目录）\n  3) 清理已确认的旧回滚容器（不删除数据）\n  0) 退出\n%b' "$COLOR_YELLOW" "$COLOR_RESET"
   local choice
-  printf '%b请输入 1、2 或 0：%b' "$COLOR_YELLOW" "$COLOR_RESET" >&2
+  printf '%b请输入 1、2、3 或 0：%b' "$COLOR_YELLOW" "$COLOR_RESET" >&2
   read -r choice
   case "$choice" in
     1) MODE="install" ;;
     2) MODE="update" ;;
+    3) MODE="cleanup" ;;
     0) info "已退出，系统未做任何修改。"; exit 0 ;;
     *) die "无效选择：${choice:-空}。"
   esac
@@ -493,6 +497,59 @@ update_komari_panel() {
   warn "旧容器 ${backup_name} 已停止保留；确认新版本稳定后再自行清理。"
 }
 
+cleanup_old_containers() {
+  require_docker
+  [[ "$ASSUME_YES" -eq 0 ]] || die "为防止误删，清理旧容器不支持 --yes；请交互确认。"
+
+  local name state selection candidate found=0
+  local -a candidates=()
+  while IFS= read -r name; do
+    case "$name" in
+      "${CONTAINER_NAME}-before-update-"*|"${CONTAINER_NAME}-before-nginx-"*) ;;
+      *) continue ;;
+    esac
+
+    state=$(docker inspect --format '{{.State.Status}}' "$name")
+    if [[ "$state" == "running" ]]; then
+      warn "跳过仍在运行的回滚容器：${name}"
+      continue
+    fi
+    candidates+=("$name")
+  done < <(docker ps -a --format '{{.Names}}')
+
+  if [[ "${#candidates[@]}" -eq 0 ]]; then
+    success "没有可清理的已停止回滚容器。"
+    return 0
+  fi
+
+  warn "下列均为已停止的回滚容器；删除容器不会删除 Komari 数据目录或 /root/komari-backups 中的归档："
+  for candidate in "${candidates[@]}"; do
+    state=$(docker inspect --format '{{.State.Status}}' "$candidate")
+    printf '  - %s（状态：%s）\n' "$candidate" "$state"
+  done
+
+  printf '%b请输入要删除的完整容器名称，或输入 0 取消：%b' "$COLOR_YELLOW" "$COLOR_RESET" >&2
+  read -r selection
+  [[ "$selection" != "0" ]] || {
+    info "已取消，未删除任何容器。"
+    return 0
+  }
+
+  for candidate in "${candidates[@]}"; do
+    [[ "$selection" == "$candidate" ]] && found=1
+  done
+  [[ "$found" -eq 1 ]] || die "只能删除上面列出的完整容器名称。"
+
+  state=$(docker inspect --format '{{.State.Status}}' "$selection")
+  [[ "$state" != "running" ]] || die "拒绝删除仍在运行的容器：${selection}"
+  if ! confirm "即将永久删除容器 ${selection}；不会删除数据目录。是否继续"; then
+    info "已取消，未删除任何容器。"
+    return 0
+  fi
+  docker rm "$selection"
+  success "已删除旧回滚容器：${selection}；Komari 数据目录和归档未受影响。"
+}
+
 print_change_summary() {
   cat <<EOF
 
@@ -552,6 +609,10 @@ main() {
       [[ -z "$DOMAIN$CERT_SOURCE$KEY_SOURCE$AOP_CA_SOURCE" ]] || warn "更新模式不使用域名或证书参数；将保留现有 Nginx 与 AOP 配置。"
       info "已选择：安全更新 Komari 面板。"
       update_komari_panel
+      ;;
+    cleanup)
+      info "已选择：清理已确认的旧回滚容器。"
+      cleanup_old_containers
       ;;
     *) die "未知操作模式：${MODE}" ;;
   esac

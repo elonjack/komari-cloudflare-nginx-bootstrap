@@ -96,7 +96,7 @@ ls -l /root/komari-origin
 mkdir -p /root/komari-bootstrap && curl --proto '=https' --tlsv1.2 -fLo /root/komari-bootstrap/komari-cloudflare-nginx.sh https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh && bash /root/komari-bootstrap/komari-cloudflare-nginx.sh
 ```
 
-它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`）。每次执行都会覆盖下载为仓库的最新版；脚本顶部会先显示版本号。随后显示菜单：选择 `1` 是安装/重新加固，选择 `2` 是安全更新已有面板。需要你输入内容的提示为黄色；下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
+它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`）。每次执行都会覆盖下载为仓库的最新版；脚本顶部会先显示版本号。随后显示菜单：选择 `1` 是安装/重新加固，选择 `2` 是安全更新已有面板，选择 `3` 是清理已确认的旧回滚容器。需要你输入内容的提示为黄色；下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
 
 ### 完整、可审计写法
 
@@ -159,6 +159,20 @@ bash /root/komari-bootstrap/komari-cloudflare-nginx.sh --update
 ```
 
 更新模式会拒绝非本机 `127.0.0.1:25774` 的 Docker 端口映射。若它报端口映射不符合要求，选择菜单 `1` 重新加固，而不是手动把 `-p 25774:25774` 加回去。
+
+### 确认稳定后清理旧容器
+
+更新成功后，旧容器会保留为 `komari-before-update-时间戳`。建议至少观察一两天，并确认 HTTPS 域名、登录、节点和历史数据都正常后再清理。
+
+重新执行同一条一键命令，在菜单输入 `3`。脚本只会列出自身创建、并且**当前已停止**的回滚容器；你必须输入完整容器名称并再次输入 `y` 才会删除。它不会删除 Komari 的 `/app/data` 数据目录，也不会删除 `/root/komari-backups/` 的更新前归档。
+
+如需直接进入该菜单项：
+
+```bash
+bash /root/komari-bootstrap/komari-cloudflare-nginx.sh --cleanup
+```
+
+清理模式不支持 `--yes`，以防误删。
 
 ## 脚本完成后
 
