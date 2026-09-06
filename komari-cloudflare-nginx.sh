@@ -10,7 +10,7 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.4.0"
+readonly SCRIPT_VERSION="1.4.1"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
@@ -255,8 +255,17 @@ detect_komari_data_directory() {
 }
 
 require_docker() {
-  command -v docker >/dev/null 2>&1 || die "未安装 Docker，无法继续。"
-  systemctl is-active --quiet docker || systemctl enable --now docker
+  if ! command -v docker >/dev/null 2>&1; then
+    info "未检测到 Docker；正在通过 Debian 软件源安装 docker.io。"
+    apt-get update
+    apt-get install -y docker.io
+  fi
+
+  command -v docker >/dev/null 2>&1 || die "Docker 安装后仍不可用，无法继续。"
+  info "正在启用并启动 Docker 服务。"
+  systemctl enable --now docker || die "无法启用或启动 Docker 服务。"
+  systemctl is-active --quiet docker || die "Docker 服务未处于运行状态。"
+  docker info >/dev/null 2>&1 || die "Docker 守护进程不可用。"
 }
 
 wait_for_komari() {
@@ -573,6 +582,7 @@ run_install() {
     die "已取消，系统未开始修改。"
   fi
 
+  require_docker
   install_nginx
   configure_automatic_security_updates
   detect_komari_data_directory

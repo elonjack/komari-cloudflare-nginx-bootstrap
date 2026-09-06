@@ -1,12 +1,13 @@
 # Komari + Cloudflare + Nginx 安全反向代理与更新脚本
 
-适用于已用 Docker 运行 Komari 面板的 **Debian 13** 服务器。
+适用于 **Debian 13** 服务器。脚本会检测 Docker；未安装时，会通过 Debian 软件源自动安装 `docker.io` 并启用服务。
 
 脚本会把原先 Docker 的公网端口映射，收紧为仅本机可访问的 `127.0.0.1:25774:25774`；外部访问统一经由 Cloudflare 与 Nginx 的 HTTPS `443` 端口。
 
 ## 脚本会做什么
 
 - 校验 Cloudflare 源证书与私钥是否匹配。
+- 检测 Docker；未安装时先执行 `apt-get update`，再安装 `docker.io` 并启动 Docker 服务。
 - 安装并启用 Nginx，配置 Komari 所需的 HTTPS 与 WebSocket 反向代理。
 - 只为 Komari 配置 HTTPS `443`；不创建 Komari 的 HTTP `80` 入口。
 - 保留原 Komari 数据目录，不拉取新镜像，也不删除数据。
@@ -24,6 +25,8 @@
 - 不会在未经确认的情况下更新 Komari 镜像。
 
 ## 开始前准备
+
+首次执行时，脚本需要能访问 Debian 软件源以安装 Docker 和 Nginx；也需要能访问 GitHub Container Registry 以拉取 Komari 镜像。Docker 安装会在你确认继续后、写入 Nginx 或证书配置前执行。
 
 ### 1. 配置 Cloudflare DNS
 

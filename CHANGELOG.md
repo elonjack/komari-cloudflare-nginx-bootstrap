@@ -2,6 +2,11 @@
 
 本文件记录项目的重要变更。
 
+## 1.4.1 — 2026-09-06
+
+- 未检测到 Docker 时，安装流程会在写入 Nginx 或证书配置前自动更新 Debian 软件包索引、安装 `docker.io`、启用并验证 Docker 服务。
+- README 明确首次部署需要访问 Debian 软件源和 GitHub Container Registry，并说明脚本会自动安装 Docker。
+
 ## 1.4.0 — 2026-08-13
 
 - 新增菜单项和 `--cleanup`：交互式清理已停止的旧回滚容器。
