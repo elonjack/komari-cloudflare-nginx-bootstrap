@@ -2,6 +2,12 @@
 
 本文件记录项目的重要变更。
 
+## 1.4.2 — 2026-11-19
+
+- 为规避 `CVE-2026-123007` 与 `CVE-2026-123633`，新生成的 Komari Nginx 站点配置显式设置 `http2 off;`。
+- Cloudflare 边缘仍可向访客提供 HTTP/2 或 HTTP/3；本次变更仅关闭 Cloudflare（或其他客户端）到源站 Nginx 的 HTTP/2。
+- 待 Debian 13 发布并安装包含修复的 Nginx 安全包后，再评估恢复源站 HTTP/2。
+
 ## 1.4.1 — 2026-09-06
 
 - 未检测到 Docker 时，安装流程会在写入 Nginx 或证书配置前自动更新 Debian 软件包索引、安装 `docker.io`、启用并验证 Docker 服务。

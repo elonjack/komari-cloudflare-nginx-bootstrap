@@ -10,7 +10,7 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.4.1"
+readonly SCRIPT_VERSION="1.4.2"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
@@ -293,7 +293,7 @@ write_certificate_files() {
 }
 
 write_nginx_configuration() {
-  info "正在生成仅监听 TCP 443 的 Nginx HTTPS 反向代理配置。"
+  info "正在生成仅监听 TCP 443、禁用源站 HTTP/2 的 Nginx HTTPS 反向代理配置。"
   local candidate backup="" aop_directives=""
   if [[ -n "$AOP_CA_SOURCE" ]]; then
     aop_directives="    ssl_client_certificate ${CERT_DIRECTORY}/cloudflare-aop-ca.pem;
@@ -304,7 +304,8 @@ write_nginx_configuration() {
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
-    http2 on;
+    # Debian 发布 CVE-2026-123007 与 CVE-2026-123633 修复包前保持禁用。
+    http2 off;
     server_name ${DOMAIN};
 
     ssl_certificate     ${CERT_DIRECTORY}/origin.pem;
@@ -563,7 +564,7 @@ print_change_summary() {
   cat <<EOF
 
 即将执行以下操作：
-  1. 安装并启用 Nginx，且只为 Komari 配置 HTTPS TCP 443。
+  1. 安装并启用 Nginx，只为 Komari 配置 HTTPS TCP 443，并禁用源站 HTTP/2。
   2. 将 Komari Docker 映射改为 127.0.0.1:25774:25774，移除其公网入口。
   3. 保留现有 Komari 数据目录，不拉取新镜像，不删除数据。
   4. 将原 Komari 容器改名并停止，以便必要时回滚。

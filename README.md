@@ -10,6 +10,7 @@
 - 检测 Docker；未安装时先执行 `apt-get update`，再安装 `docker.io` 并启动 Docker 服务。
 - 安装并启用 Nginx，配置 Komari 所需的 HTTPS 与 WebSocket 反向代理。
 - 只为 Komari 配置 HTTPS `443`；不创建 Komari 的 HTTP `80` 入口。
+- 显式禁用源站 Nginx HTTP/2，以规避 `CVE-2026-123007` 与 `CVE-2026-123633`；Cloudflare 边缘仍可向访客提供 HTTP/2 或 HTTP/3。
 - 保留原 Komari 数据目录，不拉取新镜像，也不删除数据。
 - 停止并重命名旧 Komari 容器，保留为可回滚备份。
 - 提供独立的“安全更新面板”选项：拉取官方最新镜像、保留本机端口绑定，并自动创建更新前数据归档。
