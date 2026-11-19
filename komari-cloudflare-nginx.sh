@@ -10,7 +10,8 @@ IFS=$'\n\t'
 
 SCRIPT_NAME=$(basename -- "$0")
 readonly SCRIPT_NAME
-readonly SCRIPT_VERSION="1.4.2"
+readonly SCRIPT_VERSION="1.5.0"
+readonly SCRIPT_RELEASE_BASE_URL="https://github.com/elonjack/komari-cloudflare-nginx-bootstrap/releases/latest/download"
 readonly NGINX_SITE_NAME="komari"
 readonly NGINX_SITE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 readonly NGINX_LINK="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
@@ -72,6 +73,7 @@ usage() {
   ${SCRIPT_NAME} --install [选项]     # 安装或重新加固
   ${SCRIPT_NAME} --update [选项]      # 安全更新已有 Komari 面板
   ${SCRIPT_NAME} --cleanup             # 清理已确认的旧回滚容器
+  ${SCRIPT_NAME} --self-update         # 安全更新本脚本
 
 主要参数：
   --domain 域名                对外访问域名，例如 komari.example.com
@@ -88,6 +90,7 @@ usage() {
   --install                    直接进入安装或重新加固流程
   --update                     直接进入更新面板流程
   --cleanup                    交互式清理已停止的旧回滚容器
+  --self-update                从 GitHub 最新 Release 校验并更新本脚本
   --enable-security-updates    启用 Debian 无人值守安全更新（包含 Nginx）
   --disable-security-updates   不修改现有的自动更新设置
   --yes                        跳过安装/更新确认；清理旧容器时不可使用
@@ -138,6 +141,7 @@ parse_arguments() {
       --install) MODE="install"; shift ;;
       --update) MODE="update"; shift ;;
       --cleanup) MODE="cleanup"; shift ;;
+      --self-update) MODE="self-update"; shift ;;
       --enable-security-updates) AUTO_SECURITY_UPDATES="yes"; shift ;;
       --disable-security-updates) AUTO_SECURITY_UPDATES="no"; shift ;;
       --yes) ASSUME_YES=1; shift ;;
@@ -159,17 +163,79 @@ choose_mode() {
   [[ -n "$MODE" ]] && return 0
   [[ "$ASSUME_YES" -eq 0 ]] || die "使用 --yes 时必须同时指定 --install 或 --update。"
 
-  printf '\n%b[请选择操作]\n\n  1) 安装或重新加固 Komari（Nginx、Cloudflare 源证书、可选 AOP）\n  2) 安全更新已有 Komari 面板（保持本机端口绑定和数据目录）\n  3) 清理已确认的旧回滚容器（不删除数据）\n  0) 退出\n%b' "$COLOR_YELLOW" "$COLOR_RESET"
+  printf '\n%b[请选择操作]\n\n  1) 安装或重新加固 Komari（Nginx、Cloudflare 源证书、可选 AOP）\n  2) 安全更新已有 Komari 面板（保持本机端口绑定和数据目录）\n  3) 清理已确认的旧回滚容器（不删除数据）\n  4) 更新本脚本（校验 GitHub Release SHA-256）\n  0) 退出\n%b' "$COLOR_YELLOW" "$COLOR_RESET"
   local choice
-  printf '%b请输入 1、2、3 或 0：%b' "$COLOR_YELLOW" "$COLOR_RESET" >&2
+  printf '%b请输入 1、2、3、4 或 0：%b' "$COLOR_YELLOW" "$COLOR_RESET" >&2
   read -r choice
   case "$choice" in
     1) MODE="install" ;;
     2) MODE="update" ;;
     3) MODE="cleanup" ;;
+    4) MODE="self-update" ;;
     0) info "已退出，系统未做任何修改。"; exit 0 ;;
     *) die "无效选择：${choice:-空}。"
   esac
+}
+
+update_script() {
+  command -v curl >/dev/null 2>&1 || die "缺少 curl，无法下载脚本更新。"
+  command -v sha256sum >/dev/null 2>&1 || die "缺少 sha256sum，无法校验脚本更新。"
+
+  local target target_directory candidate checksum_file expected_checksum actual_checksum new_version backup
+  target=$(readlink -f -- "$0")
+  [[ -n "$target" && -f "$target" ]] || die "无法确定当前脚本路径，未执行更新。"
+  target_directory=$(dirname -- "$target")
+  candidate=$(mktemp "${target_directory}/.${SCRIPT_NAME}.update.XXXXXX")
+  checksum_file=$(mktemp "${target_directory}/.${SCRIPT_NAME}.sha256.XXXXXX")
+
+  info "正在从 GitHub 最新 Release 下载脚本与 SHA-256 校验文件。"
+  if ! curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL \
+    "${SCRIPT_RELEASE_BASE_URL}/komari-cloudflare-nginx.sh" -o "$candidate"; then
+    rm -f -- "$candidate" "$checksum_file"
+    die "脚本下载失败；现有脚本未被修改。"
+  fi
+  if ! curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL \
+    "${SCRIPT_RELEASE_BASE_URL}/komari-cloudflare-nginx.sh.sha256" -o "$checksum_file"; then
+    rm -f -- "$candidate" "$checksum_file"
+    die "校验文件下载失败；现有脚本未被修改。"
+  fi
+
+  expected_checksum=$(awk 'NR == 1 { print $1 }' "$checksum_file")
+  actual_checksum=$(sha256sum "$candidate")
+  actual_checksum=${actual_checksum%% *}
+  if [[ ! "$expected_checksum" =~ ^[[:xdigit:]]{64}$ || "${expected_checksum,,}" != "${actual_checksum,,}" ]]; then
+    rm -f -- "$candidate" "$checksum_file"
+    die "SHA-256 校验失败；已丢弃下载文件，现有脚本未被修改。"
+  fi
+  if ! bash -n "$candidate"; then
+    rm -f -- "$candidate" "$checksum_file"
+    die "新脚本未通过 Bash 语法检查；现有脚本未被修改。"
+  fi
+
+  new_version=$(sed -n 's/^readonly SCRIPT_VERSION="\([^"]*\)"$/\1/p' "$candidate")
+  if [[ ! "$new_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    rm -f -- "$candidate" "$checksum_file"
+    die "无法识别新脚本版本；现有脚本未被修改。"
+  fi
+  if [[ "$new_version" == "$SCRIPT_VERSION" ]]; then
+    rm -f -- "$candidate" "$checksum_file"
+    success "当前已是最新版本 v${SCRIPT_VERSION}，未修改脚本。"
+    return 0
+  fi
+  if dpkg --compare-versions "$new_version" lt "$SCRIPT_VERSION"; then
+    rm -f -- "$candidate" "$checksum_file"
+    warn "GitHub 最新 Release v${new_version} 低于当前 v${SCRIPT_VERSION}；为避免降级，未修改脚本。"
+    return 0
+  fi
+
+  backup="${target}.bak.$(date +%Y%m%d%H%M%S)"
+  cp -a -- "$target" "$backup"
+  chmod 0700 "$candidate"
+  mv -f -- "$candidate" "$target"
+  rm -f -- "$checksum_file"
+  success "脚本已从 v${SCRIPT_VERSION} 更新到 v${new_version}。"
+  info "旧脚本备份：${backup}"
+  info "请重新运行 ${target} 使用新版本。"
 }
 
 validate_install_arguments() {
@@ -624,6 +690,10 @@ main() {
     cleanup)
       info "已选择：清理已确认的旧回滚容器。"
       cleanup_old_containers
+      ;;
+    self-update)
+      info "已选择：更新本脚本。"
+      update_script
       ;;
     *) die "未知操作模式：${MODE}" ;;
   esac

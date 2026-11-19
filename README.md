@@ -14,6 +14,7 @@
 - 保留原 Komari 数据目录，不拉取新镜像，也不删除数据。
 - 停止并重命名旧 Komari 容器，保留为可回滚备份。
 - 提供独立的“安全更新面板”选项：拉取官方最新镜像、保留本机端口绑定，并自动创建更新前数据归档。
+- 提供独立的脚本自更新选项：从 GitHub 最新正式 Release 下载脚本并核对 SHA-256，验证成功后才替换当前文件，同时保留旧版本备份。
 - 可选启用 Debian 无人值守**安全更新**，包含 Nginx 安全补丁。
 - 在完成前校验 Nginx 配置，最多等待约 60 秒检查本机 Komari 是否完成初始化；若新容器未就绪，会自动恢复旧容器。
 
@@ -100,7 +101,7 @@ ls -l /root/komari-origin
 mkdir -p /root/komari-bootstrap && curl --proto '=https' --tlsv1.2 -fLo /root/komari-bootstrap/komari-cloudflare-nginx.sh https://raw.githubusercontent.com/elonjack/komari-cloudflare-nginx-bootstrap/main/komari-cloudflare-nginx.sh && bash /root/komari-bootstrap/komari-cloudflare-nginx.sh
 ```
 
-它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`）。每次执行都会覆盖下载为仓库的最新版；脚本顶部会先显示版本号。随后显示菜单：选择 `1` 是安装/重新加固，选择 `2` 是安全更新已有面板，选择 `3` 是清理已确认的旧回滚容器。需要你输入内容的提示为黄色；下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
+它会下载脚本到本机后再运行（不会直接把网络内容管道交给 `bash`）。每次执行都会覆盖下载为仓库的最新版；脚本顶部会先显示版本号。随后显示菜单：选择 `1` 是安装/重新加固，选择 `2` 是安全更新已有面板，选择 `3` 是清理已确认的旧回滚容器，选择 `4` 是从 GitHub 最新正式 Release 校验并更新脚本自身。需要你输入内容的提示为黄色；下载后的脚本保留在 `/root/komari-bootstrap/`，可先用 `less /root/komari-bootstrap/komari-cloudflare-nginx.sh` 查看内容。
 
 ### 完整、可审计写法
 
@@ -163,6 +164,18 @@ bash /root/komari-bootstrap/komari-cloudflare-nginx.sh --update
 ```
 
 更新模式会拒绝非本机 `127.0.0.1:25774` 的 Docker 端口映射。若它报端口映射不符合要求，选择菜单 `1` 重新加固，而不是手动把 `-p 25774:25774` 加回去。
+
+## 更新脚本自身
+
+重新运行保存在 `/root/komari-bootstrap/` 下的脚本，在菜单输入 `4`。脚本会从 GitHub 最新正式 Release 下载 `komari-cloudflare-nginx.sh` 及其 `.sha256` 校验文件，依次核对 SHA-256、Bash 语法和版本号，全部通过后才替换当前脚本，并把旧版本保存为带时间戳的 `.bak` 文件。更新完成后按提示重新运行脚本即可。
+
+也可以直接执行：
+
+```bash
+bash /root/komari-bootstrap/komari-cloudflare-nginx.sh --self-update
+```
+
+下载失败、校验失败、语法错误或最新 Release 版本低于当前版本时，现有脚本不会被修改。首次使用该功能前，需要先手动下载包含此功能的 v1.5.0 或更高版本。
 
 ### 确认稳定后清理旧容器
 
